@@ -1,0 +1,553 @@
+# MaxAI Productivity Assistant - Complete Documentation
+
+## Project Overview
+
+MaxAI is a productivity assistant chatbot that combines Google OAuth authentication, AI-powered responses, and calendar integration. The application uses a modern full-stack architecture with Next.js frontend and FastAPI backend.
+
+## Architecture
+
+```
+Frontend (Next.js) ←→ Backend (Python/FastAPI) ←→ Google APIs
+     Port 3000              Port 8000              Calendar, Gemini
+```
+
+## Frontend Components Documentation
+
+### 1. GoogleLogin Component (`src/components/GoogleLogin.tsx`)
+
+**Purpose:** Handles Google OAuth authentication and displays user session information.
+
+**Key Features:**
+- Google OAuth integration via NextAuth
+- Session state management
+- Conditional UI rendering based on authentication status
+- Access token display for debugging
+
+#### Detailed Function Breakdown:
+
+```tsx
+'use client';  // Marks this as a client-side component
+```
+
+**Why 'use client':**
+- Next.js 13+ uses server components by default
+- This component needs browser APIs (cookies, localStorage)
+- NextAuth requires client-side execution for session management
+
+```tsx
+import { signIn, signOut, useSession } from 'next-auth/react';
+```
+
+**NextAuth Functions:**
+- `signIn('google')`: Initiates Google OAuth flow
+- `signOut()`: Clears user session and logs out
+- `useSession()`: React hook that provides current session data
+
+```tsx
+const { data: session } = useSession();
+```
+
+**Session Object Structure:**
+```typescript
+{
+  user: {
+    email: string;
+    name?: string;
+    image?: string;
+  };
+  accessToken?: string;  // Google OAuth access token
+  expires: string;
+}
+```
+
+#### Conditional Rendering Logic:
+
+```tsx
+if (session) {
+  // User is logged in - show welcome UI
+} else {
+  // User is not logged in - show login button
+}
+```
+
+**Logged-In State UI:**
+- Displays user email from Google account
+- Shows first 20 characters of access token (for debugging)
+- Provides sign-out functionality
+- Uses shadcn/ui Card components for consistent styling
+
+**Logged-Out State UI:**
+- Shows application title and description
+- Displays "Sign in with Google" button
+- Uses Google branding for user recognition
+
+#### State Management:
+- **No local state** - relies entirely on NextAuth session
+- **Automatic re-rendering** when session changes
+- **Persistent sessions** - survives page refreshes
+
+### 2. Chat Component (`src/components/Chat.tsx`)
+
+**Purpose:** Provides the main chat interface for user interaction with the AI assistant.
+
+**Key Features:**
+- Real-time message sending to backend
+- AI response display
+- Loading states and error handling
+- Session-based authentication
+
+#### Detailed Function Breakdown:
+
+```tsx
+const { data: session } = useSession();
+const [message, setMessage] = useState('');
+const [response, setResponse] = useState('');
+const [loading, setLoading] = useState(false);
+```
+
+**State Management:**
+- `session`: Current user authentication state
+- `message`: Current input field value
+- `response`: AI response from backend
+- `loading`: UI loading state during API calls
+
+#### sendMessage Function Analysis:
+
+```tsx
+const sendMessage = async () => {
+  if (!message.trim() || !session?.accessToken) return;
+```
+
+**Validation Logic:**
+- `message.trim()`: Removes whitespace and checks for empty messages
+- `session?.accessToken`: Ensures user is authenticated with valid token
+- `return`: Early exit if validation fails
+
+```tsx
+setLoading(true);
+```
+
+**Loading State Management:**
+- Prevents multiple simultaneous requests
+- Provides user feedback during API calls
+- Disables send button to prevent spam
+
+```tsx
+const res = await fetch('http://localhost:8000/api/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    message: message,
+    access_token: session.accessToken,
+  }),
+});
+```
+
+**HTTP Request Details:**
+- **URL**: Direct connection to Python backend
+- **Method**: POST for sending data
+- **Headers**: Specifies JSON content type
+- **Body**: Serialized JSON with message and access token
+
+**Request Payload Structure:**
+```json
+{
+  "message": "User's chat message",
+  "access_token": "Google OAuth access token"
+}
+```
+
+```tsx
+const data = await res.json();
+setResponse(data.response);
+```
+
+**Response Handling:**
+- `res.json()`: Parses JSON response from backend
+- `data.response`: Extracts AI-generated response
+- `setResponse()`: Updates UI with AI response
+
+#### Error Handling:
+
+```tsx
+} catch (error) {
+  console.error('Error:', error);
+  setResponse('Error sending message');
+} finally {
+  setLoading(false);
+}
+```
+
+**Error Management:**
+- `try-catch`: Catches network errors, JSON parsing errors
+- `console.error()`: Logs errors for debugging
+- `setResponse()`: Shows user-friendly error message
+- `finally`: Always resets loading state
+
+#### Conditional Rendering:
+
+```tsx
+if (!session) {
+  return null;
+}
+```
+
+**Security Feature:**
+- Hides chat interface for unauthenticated users
+- Prevents unauthorized API access
+- Maintains clean UI for logged-out users
+
+#### UI Structure:
+
+```tsx
+return (
+  <Card className="w-full max-w-2xl">
+    <CardHeader>
+      <CardTitle>Chat with MaxAI</CardTitle>
+    </CardHeader>
+    <CardContent className="space-y-4">
+      <div className="flex space-x-2">
+        <Input
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Type your message..."
+        />
+        <Button onClick={sendMessage} disabled={loading}>
+          {loading ? 'Sending...' : 'Send'}
+        </Button>
+      </div>
+      {response && (
+        <div className="p-4 bg-muted rounded-lg">
+          <p className="text-sm font-medium">Response:</p>
+          <p>{response}</p>
+        </div>
+      )}
+    </CardContent>
+  </Card>
+);
+```
+
+**UI Components:**
+- **Input field**: Controlled component with real-time updates
+- **Send button**: Disabled during loading, dynamic text
+- **Response display**: Conditional rendering based on response existence
+- **shadcn/ui**: Consistent design system components
+
+## Backend Documentation
+
+### FastAPI Application (`backend/app/main.py`)
+
+**Purpose:** Python backend that handles chat requests, AI processing, and Google API integration.
+
+#### Core Dependencies:
+
+```python
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
+```
+
+**Dependency Purposes:**
+- **FastAPI**: Modern Python web framework
+- **CORSMiddleware**: Handles cross-origin requests
+- **Pydantic**: Data validation and serialization
+- **google.generativeai**: Google's Gemini AI API
+- **python-dotenv**: Environment variable management
+
+#### CORS Configuration:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+```
+
+**CORS Explanation:**
+- **allow_origins**: Permits requests from Next.js frontend
+- **allow_credentials**: Enables sending cookies/auth headers
+- **allow_methods**: Specifies HTTP methods (GET, POST, OPTIONS)
+- **allow_headers**: Allows all request headers
+
+**Why CORS is Needed:**
+- Frontend (localhost:3000) and backend (localhost:8000) are different origins
+- Browsers block cross-origin requests by default
+- CORS middleware adds necessary headers to allow communication
+
+#### Data Models:
+
+```python
+class ChatMessage(BaseModel):
+    message: str
+    access_token: str 
+    user_id: str = None
+
+class ChatResponse(BaseModel):
+    response: str
+    success: bool
+```
+
+**Pydantic Models:**
+- **ChatMessage**: Validates incoming request structure
+- **ChatResponse**: Ensures consistent response format
+- **Type safety**: Prevents runtime errors from malformed data
+
+#### Chat Endpoint:
+
+```python
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(message: ChatMessage):
+    user_message = message.message
+    access_token = message.access_token
+
+    ai_response = model.generate_content(f"""
+    You are a helpful productivity assistant. The user says: {user_message}
+    
+    Respond naturally and helpfully. If they're asking about scheduling, 
+    let them know you can help with that. Keep responses concise and friendly.
+    """)
+
+    return ChatResponse(
+        response=ai_response.text,
+        success=True
+    )
+```
+
+**Endpoint Analysis:**
+- **Route**: `/api/chat` - Handles chat requests
+- **Method**: POST - Receives data from frontend
+- **Parameters**: `message: ChatMessage` - Validated request data
+- **Response**: `ChatResponse` - Structured response format
+
+**AI Processing:**
+- **Prompt engineering**: Structured prompt for consistent AI responses
+- **Context setting**: Defines AI role as productivity assistant
+- **Response formatting**: Returns clean text response
+
+#### Calendar Service Function:
+
+```python
+def get_calendar_service(access_token):
+    """Creates a Google Calendar service using the user's access token.
+    
+    This function converts an OAuth access token into a service object
+    that can interact with the user's Google Calendar for scheduling
+    meetings and managing events.
+    """
+    try:
+        creds = Credentials(access_token)
+        service = build('calendar', 'v3', credentials=creds)
+        return service
+    except Exception as e:
+        raise Exception(f"Error getting calendar service: {e}")
+```
+
+**Calendar Integration:**
+- **Credentials conversion**: Converts access token to Google credentials
+- **Service building**: Creates Calendar API service object
+- **Error handling**: Graceful error management for invalid tokens
+
+## Authentication Flow
+
+### 1. OAuth Flow Overview:
+
+```
+User clicks "Sign in with Google"
+    ↓
+NextAuth redirects to Google OAuth
+    ↓
+User authenticates with Google
+    ↓
+Google returns authorization code
+    ↓
+NextAuth exchanges code for access token
+    ↓
+Access token stored in session
+    ↓
+User can now use chat with authenticated requests
+```
+
+### 2. Session Management:
+
+**NextAuth Session Structure:**
+```typescript
+{
+  user: {
+    email: "user@gmail.com",
+    name: "User Name",
+    image: "https://..."
+  },
+  accessToken: "ya29.a0AfB_byC...",
+  expires: "2024-01-01T00:00:00.000Z"
+}
+```
+
+**Session Persistence:**
+- Stored in browser cookies
+- Automatically refreshed by NextAuth
+- Survives page refreshes and browser restarts
+
+### 3. Security Considerations:
+
+**Access Token Security:**
+- Tokens are temporary (typically 1 hour)
+- Stored securely in HTTP-only cookies
+- Automatically refreshed by NextAuth
+- Never exposed in client-side JavaScript (except for debugging)
+
+## API Communication Flow
+
+### 1. Request Flow:
+
+```
+Frontend (Chat Component)
+    ↓
+HTTP POST to http://localhost:8000/api/chat
+    ↓
+Backend (FastAPI)
+    ↓
+Gemini AI Processing
+    ↓
+Response back to Frontend
+    ↓
+UI Update with AI Response
+```
+
+### 2. Request/Response Format:
+
+**Request:**
+```json
+{
+  "message": "Can you help me schedule a meeting?",
+  "access_token": "ya29.a0AfB_byC..."
+}
+```
+
+**Response:**
+```json
+{
+  "response": "I'd be happy to help you schedule a meeting! I can assist with finding available times and creating calendar events. What details do you have for the meeting?",
+  "success": true
+}
+```
+
+## Error Handling
+
+### 1. Frontend Error Handling:
+
+**Network Errors:**
+- Connection failures
+- Timeout errors
+- CORS issues
+
+**Response Errors:**
+- Invalid JSON responses
+- HTTP error status codes
+- Missing required fields
+
+### 2. Backend Error Handling:
+
+**Validation Errors:**
+- Invalid request format
+- Missing required fields
+- Type mismatches
+
+**AI Service Errors:**
+- Gemini API failures
+- Rate limiting
+- Invalid API keys
+
+## Development Setup
+
+### 1. Environment Variables:
+
+**Frontend (.env.local):**
+```env
+NEXTAUTH_SECRET=your-secret-key
+NEXTAUTH_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+**Backend (.env):**
+```env
+GEMINI_API_KEY=your-gemini-api-key
+```
+
+### 2. Dependencies:
+
+**Frontend (package.json):**
+```json
+{
+  "dependencies": {
+    "next": "^14.0.0",
+    "next-auth": "^4.24.0",
+    "react": "^18.0.0"
+  }
+}
+```
+
+**Backend (requirements.txt):**
+```
+fastapi==0.104.1
+uvicorn==0.24.0
+google-generativeai==0.3.2
+python-dotenv==1.0.0
+pydantic==2.5.0
+```
+
+## Testing and Debugging
+
+### 1. Frontend Testing:
+
+**Browser Developer Tools:**
+- Network tab for API request monitoring
+- Console for error logging
+- Application tab for session inspection
+
+**Common Issues:**
+- CORS errors (check backend CORS configuration)
+- Authentication errors (check NextAuth setup)
+- Network errors (check backend server status)
+
+### 2. Backend Testing:
+
+**FastAPI Documentation:**
+- Visit `http://localhost:8000/docs`
+- Interactive API testing
+- Request/response inspection
+
+**Common Issues:**
+- Missing dependencies (check requirements.txt)
+- Environment variable errors (check .env file)
+- AI API errors (check Gemini API key)
+
+## Future Enhancements
+
+### 1. Calendar Integration:
+- Natural language parsing for meeting details
+- Google Calendar event creation
+- Availability checking
+- Recurring meeting support
+
+### 2. Enhanced AI Features:
+- Context-aware conversations
+- Meeting summarization
+- Task management integration
+- Email integration
+
+### 3. Security Improvements:
+- Rate limiting
+- Input sanitization
+- Token refresh handling
+- Error logging
+
+This documentation provides a comprehensive overview of your MaxAI productivity assistant. Each component is designed with specific responsibilities and clear interfaces, making the system modular and maintainable. 
