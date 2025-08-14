@@ -12,7 +12,7 @@ export default function Chat() {
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Add loading state
+  // Add loading state for chat
   if (status === 'loading') {
     return (
       <Card className="w-full max-w-2xl">

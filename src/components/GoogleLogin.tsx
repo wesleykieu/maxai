@@ -38,8 +38,9 @@ export default function GoogleLogin() {
               {session.accessToken?.substring(0, 20)}...
             </span>
           </div>
+        
           <Button 
-            onClick={() => signOut()}
+            onClick={() => signOut()}  // Sign out
             className="w-full"
           >
             Sign out
