@@ -711,5 +711,7 @@ async def handle_delete_request(access_token, user_message):
             success=True
         )
 
+        # TODO: Add a function to delete the event from the calendar
+
 
 
